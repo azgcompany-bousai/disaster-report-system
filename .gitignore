@@ -1,0 +1,4 @@
+disaster_report.db
+images/
+__pycache__/
+*.pyc
