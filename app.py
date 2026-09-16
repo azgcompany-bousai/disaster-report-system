@@ -669,14 +669,20 @@ def show_new_report_form(base_id, base_name):
             if injured_visitor > evacuated_visitor:
                 st.error(f"{company_name}:来客のうち負傷者数が避難員数を超えています")
 
-            # 【修正1】在籍数0人チェック
-            if total_employee == 0 and (evacuated_employee > 0 or absent_employee > 0 or injured_employee > 0):
-                st.error(f"{company_name}:社員の在籍数が0人のため、避難・不在・負傷者数は入力できません")
-            if total_visitor == 0 and (evacuated_visitor > 0 or absent_visitor > 0 or injured_visitor > 0):
-                st.error(f"{company_name}:来客の在籍数が0人のため、避難・不在・負傷者数は入力できません")
-
             unconfirmed_employee = total_employee - evacuated_employee - absent_employee
             unconfirmed_visitor = total_visitor - evacuated_visitor - absent_visitor
+
+            # 避難+不在が在籍数を超える場合(未確認がマイナスになる場合)にエラー
+            if unconfirmed_employee < 0:
+                st.error(
+                    f"{company_name}:社員の避難者数+不在員数({evacuated_employee + absent_employee}名)が"
+                    f"在籍総員数({total_employee}名)を超えています"
+                )
+            if unconfirmed_visitor < 0:
+                st.error(
+                    f"{company_name}:来客の避難者数+不在員数({evacuated_visitor + absent_visitor}名)が"
+                    f"在籍総員数({total_visitor}名)を超えています"
+                )
 
             st.info(
                 f"未確認人数(社員):{unconfirmed_employee}名　"
@@ -720,14 +726,12 @@ def show_new_report_form(base_id, base_name):
             if row["injured_visitor"] > row["evacuated_visitor"]:
                 error_flag = True
 
-            # 【修正1】保存時にも在籍数0人チェックを反映
-            if row["total_employee"] == 0 and (
-                row["evacuated_employee"] > 0 or row["absent_employee"] > 0 or row["injured_employee"] > 0
-            ):
+            # 避難+不在が在籍数を超える場合はエラー(未確認マイナス防止)
+            unconf_emp_check = row["total_employee"] - row["evacuated_employee"] - row["absent_employee"]
+            unconf_vis_check = row["total_visitor"] - row["evacuated_visitor"] - row["absent_visitor"]
+            if unconf_emp_check < 0:
                 error_flag = True
-            if row["total_visitor"] == 0 and (
-                row["evacuated_visitor"] > 0 or row["absent_visitor"] > 0 or row["injured_visitor"] > 0
-            ):
+            if unconf_vis_check < 0:
                 error_flag = True
 
         if uploaded_images and len(uploaded_images) > 3:
@@ -982,6 +986,10 @@ def show_hq_summary_table():
     df, damage_map = build_summary_dataframe()
     display_df = df.drop(columns=["_base_name", "_report_id"])
 
+    # ダウンロードボタンを表の上部に配置
+    show_pdf_download_button(display_df, damage_map, df)
+    st.divider()
+
     def highlight_rows(row):
         base_name = df.loc[row.name, "_base_name"]
         level = damage_map.get(base_name, "被害なし")
@@ -1017,17 +1025,21 @@ def show_hq_summary_table():
         report_id = df.loc[idx, "_report_id"]
         base_name = df.loc[idx, "_base_name"]
 
-        if report_id is None:
-            st.info(f"{base_name}拠点はまだ報告がありません。")
+        # 合計行、または詳細情報がない行は案内のみ表示(エラー防止)
+        is_no_detail = (
+            base_name == "合計"
+            or report_id is None
+            or (isinstance(report_id, float) and pd.isna(report_id))
+        )
+
+        if is_no_detail:
+            st.info("この行には詳細情報がありません。報告のある拠点行を選択してください。")
         else:
             st.markdown(f"### 選択した行の詳細:{base_name}")
-            report_row = get_report_row_by_id(report_id)
+            report_row = get_report_row_by_id(int(report_id))
             display_report_card(report_row, show_details=True, show_images=True)
     else:
         st.caption("表の行をクリックすると、その拠点の最新報告詳細がここに表示されます。")
-
-    st.divider()
-    show_pdf_download_button(display_df, damage_map, df)
 
 
 # ==========================
@@ -1395,7 +1407,6 @@ else:
     elif st.session_state.role == "hq":
         st.title("本部担当者ページ")
 
-        # 【修正6】現在日時表示と更新ボタン
         col_clock, col_refresh = st.columns([4, 1])
         with col_clock:
             st.caption(f"🕒 現在日時(JST):{now_jst().strftime('%Y年%m月%d日 %H:%M:%S')}")
