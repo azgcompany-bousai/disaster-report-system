@@ -10,8 +10,8 @@ if not os.path.exists("disaster_report.db"):
 DB_PATH = "disaster_report.db"
 IMAGE_DIR = "images"
 
-HQ_PASSWORD = "hq2026"
-ADMIN_PASSWORD = "admin2026"
+HQ_PASSWORD = st.secrets["auth"]["hq_password"]
+ADMIN_PASSWORD = st.secrets["auth"]["admin_password"]
 
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
