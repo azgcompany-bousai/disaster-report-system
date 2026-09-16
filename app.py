@@ -1,17 +1,13 @@
 import streamlit as st
 import sqlite3
 from datetime import datetime, date
+from zoneinfo import ZoneInfo
 import os
-
-# データベースが存在しない場合、初回のみ自動作成
-if not os.path.exists("disaster_report.db"):
-    import init_db
+import pandas as pd
 
 DB_PATH = "disaster_report.db"
 IMAGE_DIR = "images"
-
-HQ_PASSWORD = st.secrets["auth"]["hq_password"]
-ADMIN_PASSWORD = st.secrets["auth"]["admin_password"]
+JST = ZoneInfo("Asia/Tokyo")
 
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
@@ -20,6 +16,12 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
+
+HQ_PASSWORD = st.secrets["auth"]["hq_password"]
+ADMIN_PASSWORD = st.secrets["auth"]["admin_password"]
+
+if not os.path.exists(DB_PATH):
+    import init_db
 
 # ==========================
 # セッション状態の初期化
@@ -39,6 +41,10 @@ if "base_name" not in st.session_state:
 # ==========================
 def get_conn():
     return sqlite3.connect(DB_PATH)
+
+
+def now_jst():
+    return datetime.now(JST)
 
 
 def check_base_password(input_password):
@@ -97,7 +103,7 @@ def save_report(base_id, place_id, report_date, report_time, reporter_id,
     conn = get_conn()
     c = conn.cursor()
 
-    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    created_at = now_jst().strftime("%Y-%m-%d %H:%M:%S")
 
     c.execute("""
         INSERT INTO reports
@@ -289,7 +295,7 @@ def delete_base(base_id, deleted_by="admin"):
     c = conn.cursor()
     c.execute(
         "UPDATE bases SET delete_flag = 1, delete_datetime = ?, delete_by = ? WHERE base_id = ?",
-        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), deleted_by, base_id)
+        (now_jst().strftime("%Y-%m-%d %H:%M:%S"), deleted_by, base_id)
     )
     conn.commit()
     conn.close()
@@ -422,7 +428,6 @@ def delete_reporter(reporter_id):
 # 管理者用:報告データ削除・復元
 # ==========================
 def get_active_reports_by_base(base_id):
-    """指定拠点の、未削除の報告一覧を返す"""
     conn = get_conn()
     c = conn.cursor()
     c.execute("""
@@ -439,7 +444,6 @@ def get_active_reports_by_base(base_id):
 
 
 def get_deleted_reports_by_base(base_id):
-    """指定拠点の、削除済みの報告一覧を返す"""
     conn = get_conn()
     c = conn.cursor()
     c.execute("""
@@ -461,7 +465,7 @@ def delete_report(report_id, deleted_by="admin"):
     c = conn.cursor()
     c.execute(
         "UPDATE reports SET delete_flag = 1, delete_datetime = ?, delete_by = ? WHERE report_id = ?",
-        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), deleted_by, report_id)
+        (now_jst().strftime("%Y-%m-%d %H:%M:%S"), deleted_by, report_id)
     )
     conn.commit()
     conn.close()
@@ -492,6 +496,27 @@ def damage_level_color(level):
     return colors.get(level, "#f0f0f0")
 
 
+def calc_detail_row_summary(d):
+    """1件の内訳行から各種数値を計算する(内訳と合計の計算方式を統一するための共通関数)"""
+    (company_id, company_name, t_emp, t_vis, e_emp, e_vis,
+     i_emp, i_vis, a_emp, a_vis) = d
+    unconfirmed_emp = t_emp - e_emp - a_emp
+    unconfirmed_vis = t_vis - e_vis - a_vis
+    return {
+        "company_name": company_name,
+        "total_employee": t_emp,
+        "total_visitor": t_vis,
+        "evacuated_employee": e_emp,
+        "evacuated_visitor": e_vis,
+        "injured_employee": i_emp,
+        "injured_visitor": i_vis,
+        "absent_employee": a_emp,
+        "absent_visitor": a_vis,
+        "unconfirmed_employee": unconfirmed_emp,
+        "unconfirmed_visitor": unconfirmed_vis,
+    }
+
+
 def display_report_card(report_row, show_details=True, show_images=True):
     (report_id, base_id, base_name, place_name,
      report_date, report_time, reporter_name,
@@ -504,25 +529,27 @@ def display_report_card(report_row, show_details=True, show_images=True):
         <div style="background-color:{bg_color}; padding:15px; border-radius:8px; margin-bottom:10px;">
         <h4 style="margin:0;">拠点:{base_name}　被害レベル:【{damage_level}】</h4>
         <p style="margin:5px 0 0 0;">
-        避難場所:{place_name}　報告日時:{report_date} {report_time}　報告者:{reporter_name}
+        避難場所:{place_name}　報告日時:{report_date} {report_time}(JST)　報告者:{reporter_name}
         </p>
         </div>
         """,
         unsafe_allow_html=True
     )
 
-    details = get_report_details(report_id)
+    details_raw = get_report_details(report_id)
+    summaries = [calc_detail_row_summary(d) for d in details_raw]
 
-    total_emp = sum(d[2] for d in details)
-    total_vis = sum(d[3] for d in details)
-    evac_emp = sum(d[4] for d in details)
-    evac_vis = sum(d[5] for d in details)
-    inj_emp = sum(d[6] for d in details)
-    inj_vis = sum(d[7] for d in details)
-    abs_emp = sum(d[8] for d in details)
-    abs_vis = sum(d[9] for d in details)
-    unconf_emp = total_emp - evac_emp - abs_emp
-    unconf_vis = total_vis - evac_vis - abs_vis
+    # 【修正1】内訳の各行の値を積み上げて合計する方式に変更(内訳と合計を必ず一致させる)
+    total_emp = sum(s["total_employee"] for s in summaries)
+    total_vis = sum(s["total_visitor"] for s in summaries)
+    evac_emp = sum(s["evacuated_employee"] for s in summaries)
+    evac_vis = sum(s["evacuated_visitor"] for s in summaries)
+    inj_emp = sum(s["injured_employee"] for s in summaries)
+    inj_vis = sum(s["injured_visitor"] for s in summaries)
+    abs_emp = sum(s["absent_employee"] for s in summaries)
+    abs_vis = sum(s["absent_visitor"] for s in summaries)
+    unconf_emp = sum(s["unconfirmed_employee"] for s in summaries)
+    unconf_vis = sum(s["unconfirmed_visitor"] for s in summaries)
 
     st.markdown(" **【拠点合計】** ")
     col1, col2, col3, col4 = st.columns(4)
@@ -533,17 +560,15 @@ def display_report_card(report_row, show_details=True, show_images=True):
 
     if show_details:
         st.markdown(" **【内訳】** ")
-        for d in details:
-            (company_id, company_name, t_emp, t_vis, e_emp, e_vis,
-             i_emp, i_vis, a_emp, a_vis) = d
-            u_emp = t_emp - e_emp - a_emp
-            u_vis = t_vis - e_vis - a_vis
+        for s in summaries:
             st.write(
-                f"▼ {company_name}　"
-                f"在籍:{t_emp + t_vis}(社員{t_emp}/来客{t_vis})　"
-                f"避難:{e_emp + e_vis}(うち負傷{i_emp + i_vis})　"
-                f"不在:{a_emp + a_vis}　"
-                f"未確認:{u_emp + u_vis}"
+                f"▼ {s['company_name']}　"
+                f"在籍:{s['total_employee'] + s['total_visitor']}"
+                f"(社員{s['total_employee']}/来客{s['total_visitor']})　"
+                f"避難:{s['evacuated_employee'] + s['evacuated_visitor']}"
+                f"(うち負傷{s['injured_employee'] + s['injured_visitor']})　"
+                f"不在:{s['absent_employee'] + s['absent_visitor']}　"
+                f"未確認:{s['unconfirmed_employee'] + s['unconfirmed_visitor']}"
             )
 
     comment = get_report_free_comment(report_id)
@@ -577,9 +602,9 @@ def show_new_report_form(base_id, base_name):
 
     col1, col2 = st.columns(2)
     with col1:
-        report_date = st.date_input("避難年月日", value=date.today())
+        report_date = st.date_input("避難年月日", value=now_jst().date())
     with col2:
-        report_time = st.time_input("報告時刻", value=datetime.now().time())
+        report_time = st.time_input("報告時刻", value=now_jst().time())
 
     place_dict = {name: pid for pid, name in places}
     place_name = st.selectbox("避難場所", list(place_dict.keys()))
@@ -702,7 +727,7 @@ def show_new_report_form(base_id, base_name):
             saved_image_paths = []
             if uploaded_images:
                 for img in uploaded_images:
-                    timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
+                    timestamp = now_jst().strftime("%Y%m%d%H%M%S%f")
                     save_path = os.path.join(IMAGE_DIR, f"{timestamp}_{img.name}")
                     with open(save_path, "wb") as f:
                         f.write(img.getbuffer())
@@ -769,10 +794,153 @@ def show_own_base_history(base_id):
 
 
 # ==========================
-# 本部担当者:全拠点最新報告一覧
+# 【修正3】本部担当者:Excel形式の一覧表
+# ==========================
+def build_summary_dataframe():
+    """
+    拠点・会社部署ごとに1行の一覧表を作る。
+    報告がまだない拠点・会社部署は、マスタの社員数を初期値として
+    在籍合計に表示し、その他は空欄にする。
+    """
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT base_id, base_name FROM bases WHERE delete_flag = 0")
+    bases = c.fetchall()
+    conn.close()
+
+    rows = []
+    damage_map = {}  # 拠点ごとの被害レベル(行の色分け用)
+
+    grand_total = {
+        "在籍合計": 0, "避難合計": 0, "負傷者合計": 0,
+        "不在合計": 0, "未確認合計": 0
+    }
+
+    for base_id, base_name in bases:
+        latest = get_latest_report_per_base(base_id=base_id)
+        companies = get_companies(base_id)
+
+        if latest is None:
+            # まだ報告がない場合:マスタの社員数のみ表示
+            for company_id, company_name, employee_count in companies:
+                label = base_name if company_name == base_name else company_name
+                is_sub = company_name != base_name
+                rows.append({
+                    "拠点/部署": ("　" + label) if is_sub else label,
+                    "報告時間": "",
+                    "在籍合計": employee_count,
+                    "避難合計": "",
+                    "負傷者合計": "",
+                    "不在合計": "",
+                    "未確認合計": "",
+                    "_base_name": base_name,
+                    "_is_parent": not is_sub and len(companies) > 1,
+                })
+                grand_total["在籍合計"] += employee_count
+            damage_map[base_name] = "被害なし"
+        else:
+            report_id = latest[0]
+            report_date = latest[4]
+            report_time = latest[5]
+            damage_level = latest[7]
+            damage_map[base_name] = damage_level
+
+            details_raw = get_report_details(report_id)
+            summaries = [calc_detail_row_summary(d) for d in details_raw]
+
+            is_multi = len(summaries) > 1
+
+            if is_multi:
+                rows.append({
+                    "拠点/部署": base_name,
+                    "報告時間": f"{report_date} {report_time}",
+                    "在籍合計": sum(s["total_employee"] + s["total_visitor"] for s in summaries),
+                    "避難合計": sum(s["evacuated_employee"] + s["evacuated_visitor"] for s in summaries),
+                    "負傷者合計": sum(s["injured_employee"] + s["injured_visitor"] for s in summaries),
+                    "不在合計": sum(s["absent_employee"] + s["absent_visitor"] for s in summaries),
+                    "未確認合計": sum(s["unconfirmed_employee"] + s["unconfirmed_visitor"] for s in summaries),
+                    "_base_name": base_name,
+                    "_is_parent": True,
+                })
+                for s in summaries:
+                    rows.append({
+                        "拠点/部署": "　" + s["company_name"],
+                        "報告時間": "",
+                        "在籍合計": s["total_employee"] + s["total_visitor"],
+                        "避難合計": s["evacuated_employee"] + s["evacuated_visitor"],
+                        "負傷者合計": s["injured_employee"] + s["injured_visitor"],
+                        "不在合計": s["absent_employee"] + s["absent_visitor"],
+                        "未確認合計": s["unconfirmed_employee"] + s["unconfirmed_visitor"],
+                        "_base_name": base_name,
+                        "_is_parent": False,
+                    })
+            else:
+                s = summaries[0] if summaries else None
+                if s:
+                    rows.append({
+                        "拠点/部署": base_name,
+                        "報告時間": f"{report_date} {report_time}",
+                        "在籍合計": s["total_employee"] + s["total_visitor"],
+                        "避難合計": s["evacuated_employee"] + s["evacuated_visitor"],
+                        "負傷者合計": s["injured_employee"] + s["injured_visitor"],
+                        "不在合計": s["absent_employee"] + s["absent_visitor"],
+                        "未確認合計": s["unconfirmed_employee"] + s["unconfirmed_visitor"],
+                        "_base_name": base_name,
+                        "_is_parent": False,
+                    })
+                    grand_total["在籍合計"] += s["total_employee"] + s["total_visitor"]
+                    grand_total["避難合計"] += s["evacuated_employee"] + s["evacuated_visitor"]
+                    grand_total["負傷者合計"] += s["injured_employee"] + s["injured_visitor"]
+                    grand_total["不在合計"] += s["absent_employee"] + s["absent_visitor"]
+                    grand_total["未確認合計"] += s["unconfirmed_employee"] + s["unconfirmed_visitor"]
+                    continue
+
+            grand_total["在籍合計"] += sum(s["total_employee"] + s["total_visitor"] for s in summaries)
+            grand_total["避難合計"] += sum(s["evacuated_employee"] + s["evacuated_visitor"] for s in summaries)
+            grand_total["負傷者合計"] += sum(s["injured_employee"] + s["injured_visitor"] for s in summaries)
+            grand_total["不在合計"] += sum(s["absent_employee"] + s["absent_visitor"] for s in summaries)
+            grand_total["未確認合計"] += sum(s["unconfirmed_employee"] + s["unconfirmed_visitor"] for s in summaries)
+
+    rows.append({
+        "拠点/部署": "合計",
+        "報告時間": "",
+        "在籍合計": grand_total["在籍合計"],
+        "避難合計": grand_total["避難合計"],
+        "負傷者合計": grand_total["負傷者合計"],
+        "不在合計": grand_total["不在合計"],
+        "未確認合計": grand_total["未確認合計"],
+        "_base_name": "合計",
+        "_is_parent": False,
+    })
+
+    df = pd.DataFrame(rows)
+    return df, damage_map
+
+
+def show_hq_summary_table():
+    st.subheader("全拠点 状況一覧表")
+
+    df, damage_map = build_summary_dataframe()
+
+    display_df = df.drop(columns=["_base_name", "_is_parent"])
+
+    def highlight_rows(row):
+        base_name = df.loc[row.name, "_base_name"]
+        level = damage_map.get(base_name, "被害なし")
+        color = damage_level_color(level)
+        if base_name == "合計":
+            color = "#d9d9d9"
+        return [f"background-color: {color}"] * len(row)
+
+    styled = display_df.style.apply(highlight_rows, axis=1)
+    st.dataframe(styled, use_container_width=True, height=600)
+
+
+# ==========================
+# 本部担当者:全拠点最新報告一覧(カード形式)
 # ==========================
 def show_hq_dashboard():
-    st.subheader("全拠点 最新報告一覧")
+    st.subheader("全拠点 最新報告一覧(詳細カード)")
 
     latest_list = get_latest_report_per_base()
 
@@ -1001,7 +1169,6 @@ def show_admin_report_deletion():
 
     tab_active, tab_deleted = st.tabs(["有効な報告(削除する)", "削除済み報告(復元する)"])
 
-    # ---- 有効な報告の削除 ----
     with tab_active:
         active_reports = get_active_reports_by_base(selected_base_id)
 
@@ -1033,7 +1200,6 @@ def show_admin_report_deletion():
                 st.success("報告を削除しました(復元は「削除済み報告」タブから可能です)")
                 st.rerun()
 
-    # ---- 削除済み報告の復元 ----
     with tab_deleted:
         deleted_reports = get_deleted_reports_by_base(selected_base_id)
 
@@ -1135,12 +1301,15 @@ else:
     elif st.session_state.role == "hq":
         st.title("本部担当者ページ")
 
-        tab1, tab2 = st.tabs(["最新報告一覧", "拠点別履歴検索"])
+        tab1, tab2, tab3 = st.tabs(["状況一覧表", "最新報告一覧(詳細)", "拠点別履歴検索"])
 
         with tab1:
-            show_hq_dashboard()
+            show_hq_summary_table()
 
         with tab2:
+            show_hq_dashboard()
+
+        with tab3:
             show_hq_history_search()
 
     elif st.session_state.role == "admin":
