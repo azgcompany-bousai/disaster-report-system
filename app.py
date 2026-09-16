@@ -497,7 +497,6 @@ def damage_level_color(level):
 
 
 def calc_detail_row_summary(d):
-    """1件の内訳行から各種数値を計算する(内訳と合計の計算方式を統一するための共通関数)"""
     (company_id, company_name, t_emp, t_vis, e_emp, e_vis,
      i_emp, i_vis, a_emp, a_vis) = d
     unconfirmed_emp = t_emp - e_emp - a_emp
@@ -539,7 +538,6 @@ def display_report_card(report_row, show_details=True, show_images=True):
     details_raw = get_report_details(report_id)
     summaries = [calc_detail_row_summary(d) for d in details_raw]
 
-    # 【修正1】内訳の各行の値を積み上げて合計する方式に変更(内訳と合計を必ず一致させる)
     total_emp = sum(s["total_employee"] for s in summaries)
     total_vis = sum(s["total_visitor"] for s in summaries)
     evac_emp = sum(s["evacuated_employee"] for s in summaries)
@@ -554,21 +552,20 @@ def display_report_card(report_row, show_details=True, show_images=True):
     st.markdown(" **【拠点合計】** ")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("在籍合計", f"{total_emp + total_vis}名", f"社員{total_emp}/来客{total_vis}")
-    col2.metric("避難合計", f"{evac_emp + evac_vis}名", f"うち負傷{inj_emp + inj_vis}")
-    col3.metric("不在合計", f"{abs_emp + abs_vis}名")
-    col4.metric("未確認合計", f"{unconf_emp + unconf_vis}名")
+    col2.metric("避難合計", f"{evac_emp + evac_vis}名", f"社員{evac_emp}/来客{evac_vis}(うち負傷 社員{inj_emp}/来客{inj_vis})")
+    col3.metric("不在合計", f"{abs_emp + abs_vis}名", f"社員{abs_emp}/来客{abs_vis}")
+    col4.metric("未確認合計", f"{unconf_emp + unconf_vis}名", f"社員{unconf_emp}/来客{unconf_vis}")
 
     if show_details:
         st.markdown(" **【内訳】** ")
         for s in summaries:
             st.write(
                 f"▼ {s['company_name']}　"
-                f"在籍:{s['total_employee'] + s['total_visitor']}"
-                f"(社員{s['total_employee']}/来客{s['total_visitor']})　"
-                f"避難:{s['evacuated_employee'] + s['evacuated_visitor']}"
-                f"(うち負傷{s['injured_employee'] + s['injured_visitor']})　"
-                f"不在:{s['absent_employee'] + s['absent_visitor']}　"
-                f"未確認:{s['unconfirmed_employee'] + s['unconfirmed_visitor']}"
+                f"在籍:社員{s['total_employee']}/来客{s['total_visitor']}　"
+                f"避難:社員{s['evacuated_employee']}/来客{s['evacuated_visitor']}"
+                f"(負傷:社員{s['injured_employee']}/来客{s['injured_visitor']})　"
+                f"不在:社員{s['absent_employee']}/来客{s['absent_visitor']}　"
+                f"未確認:社員{s['unconfirmed_employee']}/来客{s['unconfirmed_visitor']}"
             )
 
     comment = get_report_free_comment(report_id)
@@ -624,20 +621,15 @@ def show_new_report_form(base_id, base_name):
 
     for company_id, company_name, employee_count in companies:
         with st.expander(f"■ {company_name}", expanded=True):
-            c1, c2 = st.columns(2)
-            with c1:
+            col_emp, col_vis = st.columns(2)
+
+            # 左列:社員関連をまとめて配置(タブキーで社員項目を順に移動)
+            with col_emp:
+                st.markdown(" **【社員】** ")
                 total_employee = st.number_input(
                     f"在籍総員数(社員)_{company_name}",
                     min_value=0, value=employee_count, key=f"total_emp_{company_id}"
                 )
-            with c2:
-                total_visitor = st.number_input(
-                    f"在籍総員数(来客)_{company_name}",
-                    min_value=0, value=0, key=f"total_vis_{company_id}"
-                )
-
-            c3, c4 = st.columns(2)
-            with c3:
                 evacuated_employee = st.number_input(
                     f"避難員数(社員)_{company_name}",
                     min_value=0, value=0, key=f"evac_emp_{company_id}"
@@ -646,7 +638,18 @@ def show_new_report_form(base_id, base_name):
                     f"　うち負傷者(社員)_{company_name}",
                     min_value=0, value=0, key=f"inj_emp_{company_id}"
                 )
-            with c4:
+                absent_employee = st.number_input(
+                    f"不在員数(社員)_{company_name}",
+                    min_value=0, value=0, key=f"abs_emp_{company_id}"
+                )
+
+            # 右列:来客関連をまとめて配置(社員項目の入力完了後にタブ移動)
+            with col_vis:
+                st.markdown(" **【来客】** ")
+                total_visitor = st.number_input(
+                    f"在籍総員数(来客)_{company_name}",
+                    min_value=0, value=0, key=f"total_vis_{company_id}"
+                )
                 evacuated_visitor = st.number_input(
                     f"避難員数(来客)_{company_name}",
                     min_value=0, value=0, key=f"evac_vis_{company_id}"
@@ -655,23 +658,22 @@ def show_new_report_form(base_id, base_name):
                     f"　うち負傷者(来客)_{company_name}",
                     min_value=0, value=0, key=f"inj_vis_{company_id}"
                 )
-
-            c5, c6 = st.columns(2)
-            with c5:
-                absent_employee = st.number_input(
-                    f"不在員数(社員)_{company_name}",
-                    min_value=0, value=0, key=f"abs_emp_{company_id}"
-                )
-            with c6:
                 absent_visitor = st.number_input(
                     f"不在員数(来客)_{company_name}",
                     min_value=0, value=0, key=f"abs_vis_{company_id}"
                 )
 
+            # 通常の整合性チェック
             if injured_employee > evacuated_employee:
                 st.error(f"{company_name}:社員のうち負傷者数が避難員数を超えています")
             if injured_visitor > evacuated_visitor:
                 st.error(f"{company_name}:来客のうち負傷者数が避難員数を超えています")
+
+            # 【修正1】在籍数0人チェック
+            if total_employee == 0 and (evacuated_employee > 0 or absent_employee > 0 or injured_employee > 0):
+                st.error(f"{company_name}:社員の在籍数が0人のため、避難・不在・負傷者数は入力できません")
+            if total_visitor == 0 and (evacuated_visitor > 0 or absent_visitor > 0 or injured_visitor > 0):
+                st.error(f"{company_name}:来客の在籍数が0人のため、避難・不在・負傷者数は入力できません")
 
             unconfirmed_employee = total_employee - evacuated_employee - absent_employee
             unconfirmed_visitor = total_visitor - evacuated_visitor - absent_visitor
@@ -716,6 +718,16 @@ def show_new_report_form(base_id, base_name):
             if row["injured_employee"] > row["evacuated_employee"]:
                 error_flag = True
             if row["injured_visitor"] > row["evacuated_visitor"]:
+                error_flag = True
+
+            # 【修正1】保存時にも在籍数0人チェックを反映
+            if row["total_employee"] == 0 and (
+                row["evacuated_employee"] > 0 or row["absent_employee"] > 0 or row["injured_employee"] > 0
+            ):
+                error_flag = True
+            if row["total_visitor"] == 0 and (
+                row["evacuated_visitor"] > 0 or row["absent_visitor"] > 0 or row["injured_visitor"] > 0
+            ):
                 error_flag = True
 
         if uploaded_images and len(uploaded_images) > 3:
@@ -794,14 +806,9 @@ def show_own_base_history(base_id):
 
 
 # ==========================
-# 【修正3】本部担当者:Excel形式の一覧表
+# 本部担当者:状況一覧表(Excel形式・行選択対応)
 # ==========================
 def build_summary_dataframe():
-    """
-    拠点・会社部署ごとに1行の一覧表を作る。
-    報告がまだない拠点・会社部署は、マスタの社員数を初期値として
-    在籍合計に表示し、その他は空欄にする。
-    """
     conn = get_conn()
     c = conn.cursor()
     c.execute("SELECT base_id, base_name FROM bases WHERE delete_flag = 0")
@@ -809,11 +816,14 @@ def build_summary_dataframe():
     conn.close()
 
     rows = []
-    damage_map = {}  # 拠点ごとの被害レベル(行の色分け用)
+    damage_map = {}
 
     grand_total = {
-        "在籍合計": 0, "避難合計": 0, "負傷者合計": 0,
-        "不在合計": 0, "未確認合計": 0
+        "在籍(社員)": 0, "在籍(来客)": 0,
+        "避難(社員)": 0, "避難(来客)": 0,
+        "負傷(社員)": 0, "負傷(来客)": 0,
+        "不在(社員)": 0, "不在(来客)": 0,
+        "未確認(社員)": 0, "未確認(来客)": 0,
     }
 
     for base_id, base_name in bases:
@@ -821,22 +831,20 @@ def build_summary_dataframe():
         companies = get_companies(base_id)
 
         if latest is None:
-            # まだ報告がない場合:マスタの社員数のみ表示
             for company_id, company_name, employee_count in companies:
-                label = base_name if company_name == base_name else company_name
                 is_sub = company_name != base_name
                 rows.append({
-                    "拠点/部署": ("　" + label) if is_sub else label,
+                    "拠点/部署": ("　" + company_name) if is_sub else base_name,
                     "報告時間": "",
-                    "在籍合計": employee_count,
-                    "避難合計": "",
-                    "負傷者合計": "",
-                    "不在合計": "",
-                    "未確認合計": "",
+                    "在籍(社員)": employee_count, "在籍(来客)": 0,
+                    "避難(社員)": "", "避難(来客)": "",
+                    "負傷(社員)": "", "負傷(来客)": "",
+                    "不在(社員)": "", "不在(来客)": "",
+                    "未確認(社員)": "", "未確認(来客)": "",
                     "_base_name": base_name,
-                    "_is_parent": not is_sub and len(companies) > 1,
+                    "_report_id": None,
                 })
-                grand_total["在籍合計"] += employee_count
+                grand_total["在籍(社員)"] += employee_count
             damage_map[base_name] = "被害なし"
         else:
             report_id = latest[0]
@@ -847,82 +855,132 @@ def build_summary_dataframe():
 
             details_raw = get_report_details(report_id)
             summaries = [calc_detail_row_summary(d) for d in details_raw]
-
             is_multi = len(summaries) > 1
 
             if is_multi:
                 rows.append({
                     "拠点/部署": base_name,
                     "報告時間": f"{report_date} {report_time}",
-                    "在籍合計": sum(s["total_employee"] + s["total_visitor"] for s in summaries),
-                    "避難合計": sum(s["evacuated_employee"] + s["evacuated_visitor"] for s in summaries),
-                    "負傷者合計": sum(s["injured_employee"] + s["injured_visitor"] for s in summaries),
-                    "不在合計": sum(s["absent_employee"] + s["absent_visitor"] for s in summaries),
-                    "未確認合計": sum(s["unconfirmed_employee"] + s["unconfirmed_visitor"] for s in summaries),
+                    "在籍(社員)": sum(s["total_employee"] for s in summaries),
+                    "在籍(来客)": sum(s["total_visitor"] for s in summaries),
+                    "避難(社員)": sum(s["evacuated_employee"] for s in summaries),
+                    "避難(来客)": sum(s["evacuated_visitor"] for s in summaries),
+                    "負傷(社員)": sum(s["injured_employee"] for s in summaries),
+                    "負傷(来客)": sum(s["injured_visitor"] for s in summaries),
+                    "不在(社員)": sum(s["absent_employee"] for s in summaries),
+                    "不在(来客)": sum(s["absent_visitor"] for s in summaries),
+                    "未確認(社員)": sum(s["unconfirmed_employee"] for s in summaries),
+                    "未確認(来客)": sum(s["unconfirmed_visitor"] for s in summaries),
                     "_base_name": base_name,
-                    "_is_parent": True,
+                    "_report_id": report_id,
                 })
                 for s in summaries:
                     rows.append({
                         "拠点/部署": "　" + s["company_name"],
                         "報告時間": "",
-                        "在籍合計": s["total_employee"] + s["total_visitor"],
-                        "避難合計": s["evacuated_employee"] + s["evacuated_visitor"],
-                        "負傷者合計": s["injured_employee"] + s["injured_visitor"],
-                        "不在合計": s["absent_employee"] + s["absent_visitor"],
-                        "未確認合計": s["unconfirmed_employee"] + s["unconfirmed_visitor"],
+                        "在籍(社員)": s["total_employee"], "在籍(来客)": s["total_visitor"],
+                        "避難(社員)": s["evacuated_employee"], "避難(来客)": s["evacuated_visitor"],
+                        "負傷(社員)": s["injured_employee"], "負傷(来客)": s["injured_visitor"],
+                        "不在(社員)": s["absent_employee"], "不在(来客)": s["absent_visitor"],
+                        "未確認(社員)": s["unconfirmed_employee"], "未確認(来客)": s["unconfirmed_visitor"],
                         "_base_name": base_name,
-                        "_is_parent": False,
+                        "_report_id": report_id,
                     })
             else:
-                s = summaries[0] if summaries else None
-                if s:
-                    rows.append({
-                        "拠点/部署": base_name,
-                        "報告時間": f"{report_date} {report_time}",
-                        "在籍合計": s["total_employee"] + s["total_visitor"],
-                        "避難合計": s["evacuated_employee"] + s["evacuated_visitor"],
-                        "負傷者合計": s["injured_employee"] + s["injured_visitor"],
-                        "不在合計": s["absent_employee"] + s["absent_visitor"],
-                        "未確認合計": s["unconfirmed_employee"] + s["unconfirmed_visitor"],
-                        "_base_name": base_name,
-                        "_is_parent": False,
-                    })
-                    grand_total["在籍合計"] += s["total_employee"] + s["total_visitor"]
-                    grand_total["避難合計"] += s["evacuated_employee"] + s["evacuated_visitor"]
-                    grand_total["負傷者合計"] += s["injured_employee"] + s["injured_visitor"]
-                    grand_total["不在合計"] += s["absent_employee"] + s["absent_visitor"]
-                    grand_total["未確認合計"] += s["unconfirmed_employee"] + s["unconfirmed_visitor"]
-                    continue
+                s = summaries[0]
+                rows.append({
+                    "拠点/部署": base_name,
+                    "報告時間": f"{report_date} {report_time}",
+                    "在籍(社員)": s["total_employee"], "在籍(来客)": s["total_visitor"],
+                    "避難(社員)": s["evacuated_employee"], "避難(来客)": s["evacuated_visitor"],
+                    "負傷(社員)": s["injured_employee"], "負傷(来客)": s["injured_visitor"],
+                    "不在(社員)": s["absent_employee"], "不在(来客)": s["absent_visitor"],
+                    "未確認(社員)": s["unconfirmed_employee"], "未確認(来客)": s["unconfirmed_visitor"],
+                    "_base_name": base_name,
+                    "_report_id": report_id,
+                })
 
-            grand_total["在籍合計"] += sum(s["total_employee"] + s["total_visitor"] for s in summaries)
-            grand_total["避難合計"] += sum(s["evacuated_employee"] + s["evacuated_visitor"] for s in summaries)
-            grand_total["負傷者合計"] += sum(s["injured_employee"] + s["injured_visitor"] for s in summaries)
-            grand_total["不在合計"] += sum(s["absent_employee"] + s["absent_visitor"] for s in summaries)
-            grand_total["未確認合計"] += sum(s["unconfirmed_employee"] + s["unconfirmed_visitor"] for s in summaries)
+            for key, sum_key in [
+                ("在籍(社員)", "total_employee"), ("在籍(来客)", "total_visitor"),
+                ("避難(社員)", "evacuated_employee"), ("避難(来客)", "evacuated_visitor"),
+                ("負傷(社員)", "injured_employee"), ("負傷(来客)", "injured_visitor"),
+                ("不在(社員)", "absent_employee"), ("不在(来客)", "absent_visitor"),
+                ("未確認(社員)", "unconfirmed_employee"), ("未確認(来客)", "unconfirmed_visitor"),
+            ]:
+                grand_total[key] += sum(s[sum_key] for s in summaries)
 
-    rows.append({
-        "拠点/部署": "合計",
-        "報告時間": "",
-        "在籍合計": grand_total["在籍合計"],
-        "避難合計": grand_total["避難合計"],
-        "負傷者合計": grand_total["負傷者合計"],
-        "不在合計": grand_total["不在合計"],
-        "未確認合計": grand_total["未確認合計"],
-        "_base_name": "合計",
-        "_is_parent": False,
-    })
+    total_row = {"拠点/部署": "合計", "報告時間": "", "_base_name": "合計", "_report_id": None}
+    total_row.update(grand_total)
+    rows.append(total_row)
 
     df = pd.DataFrame(rows)
     return df, damage_map
+
+
+def build_summary_html(display_df, damage_map, df):
+    now_str = now_jst().strftime('%Y年%m月%d日 %H:%M:%S')
+    rows_html = ""
+    for idx, row in display_df.iterrows():
+        base_name = df.loc[idx, "_base_name"]
+        level = damage_map.get(base_name, "被害なし")
+        color = damage_level_color(level)
+        if base_name == "合計":
+            color = "#d9d9d9"
+        cells = "".join(
+            f"<td style='border:1px solid #999; padding:4px;'>{v}</td>" for v in row
+        )
+        rows_html += f"<tr style='background-color:{color};'>{cells}</tr>\n"
+
+    headers_html = "".join(
+        f"<th style='border:1px solid #999; padding:4px; background-color:#333; color:#fff;'>{col}</th>"
+        for col in display_df.columns
+    )
+
+    html = f"""
+    <html>
+    <head>
+    <meta charset="utf-8">
+    <title>災害状況報告 一覧表</title>
+    <style>
+        body {{ font-family: sans-serif; }}
+        table {{ border-collapse: collapse; width: 100%; }}
+        @media print {{
+            body {{ margin: 0; }}
+        }}
+    </style>
+    </head>
+    <body>
+    <h2>災害状況報告 全拠点一覧表</h2>
+    <p>出力日時(JST):{now_str}</p>
+    <table>
+    <tr>{headers_html}</tr>
+    {rows_html}
+    </table>
+    </body>
+    </html>
+    """
+    return html
+
+
+def show_pdf_download_button(display_df, damage_map, df):
+    html_content = build_summary_html(display_df, damage_map, df)
+    st.download_button(
+        label="📄 一覧表を印刷用ファイルとしてダウンロード",
+        data=html_content.encode("utf-8"),
+        file_name=f"disaster_report_summary_{now_jst().strftime('%Y%m%d_%H%M')}.html",
+        mime="text/html"
+    )
+    st.caption(
+        "ダウンロードしたファイルをブラウザで開き、印刷(Ctrl+P、Macは⌘+P)から"
+        "「PDFに保存」を選ぶとPDF化できます。"
+    )
 
 
 def show_hq_summary_table():
     st.subheader("全拠点 状況一覧表")
 
     df, damage_map = build_summary_dataframe()
-
-    display_df = df.drop(columns=["_base_name", "_is_parent"])
+    display_df = df.drop(columns=["_base_name", "_report_id"])
 
     def highlight_rows(row):
         base_name = df.loc[row.name, "_base_name"]
@@ -933,7 +991,43 @@ def show_hq_summary_table():
         return [f"background-color: {color}"] * len(row)
 
     styled = display_df.style.apply(highlight_rows, axis=1)
-    st.dataframe(styled, use_container_width=True, height=600)
+
+    event = st.dataframe(
+        styled,
+        use_container_width=True,
+        height=600,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="hq_summary_table"
+    )
+
+    selected_rows = []
+    try:
+        selected_rows = event.selection["rows"]
+    except Exception:
+        try:
+            selected_rows = event["selection"]["rows"]
+        except Exception:
+            selected_rows = []
+
+    st.divider()
+
+    if selected_rows:
+        idx = selected_rows[0]
+        report_id = df.loc[idx, "_report_id"]
+        base_name = df.loc[idx, "_base_name"]
+
+        if report_id is None:
+            st.info(f"{base_name}拠点はまだ報告がありません。")
+        else:
+            st.markdown(f"### 選択した行の詳細:{base_name}")
+            report_row = get_report_row_by_id(report_id)
+            display_report_card(report_row, show_details=True, show_images=True)
+    else:
+        st.caption("表の行をクリックすると、その拠点の最新報告詳細がここに表示されます。")
+
+    st.divider()
+    show_pdf_download_button(display_df, damage_map, df)
 
 
 # ==========================
@@ -1300,6 +1394,14 @@ else:
 
     elif st.session_state.role == "hq":
         st.title("本部担当者ページ")
+
+        # 【修正6】現在日時表示と更新ボタン
+        col_clock, col_refresh = st.columns([4, 1])
+        with col_clock:
+            st.caption(f"🕒 現在日時(JST):{now_jst().strftime('%Y年%m月%d日 %H:%M:%S')}")
+        with col_refresh:
+            if st.button("🔄 時刻更新"):
+                st.rerun()
 
         tab1, tab2, tab3 = st.tabs(["状況一覧表", "最新報告一覧(詳細)", "拠点別履歴検索"])
 
