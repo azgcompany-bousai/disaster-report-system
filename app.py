@@ -4,6 +4,7 @@ from datetime import datetime, date
 from zoneinfo import ZoneInfo
 import os
 import pandas as pd
+from streamlit_autorefresh import st_autorefresh
 
 DB_PATH = "disaster_report.db"
 IMAGE_DIR = "images"
@@ -587,6 +588,40 @@ def display_report_card(report_row, show_details=True, show_images=True):
 # 拠点担当者:新規報告フォーム
 # ==========================
 def show_new_report_form(base_id, base_name):
+
+    # 【追加】ページ上部の目印(このid="top"に向かってジャンプする)
+    st.markdown('<div id="top"></div>', unsafe_allow_html=True)
+
+    # 【追加】画面右下に固定表示される「上に戻る」ボタン
+    st.markdown(
+        """
+        <style>
+        #backToTopBtn {
+            position: fixed;
+            bottom: 30px;
+            right: 20px;
+            z-index: 9999;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 56px;
+            height: 56px;
+            font-size: 24px;
+            text-align: center;
+            line-height: 56px;
+            text-decoration: none;
+            box-shadow: 2px 2px 6px rgba(0,0,0,0.3);
+        }
+        #backToTopBtn:hover {
+            background-color: #45a049;
+        }
+        </style>
+        <a href="#top" id="backToTopBtn">⬆</a>
+        """,
+        unsafe_allow_html=True
+    )
+
     st.subheader("新規報告入力")
 
     companies = get_companies(base_id)
@@ -1407,12 +1442,28 @@ else:
     elif st.session_state.role == "hq":
         st.title("本部担当者ページ")
 
-        col_clock, col_refresh = st.columns([4, 1])
+        col_clock, col_toggle, col_interval, col_refresh = st.columns([3, 1.5, 1.5, 1])
+
         with col_clock:
             st.caption(f"🕒 現在日時(JST):{now_jst().strftime('%Y年%m月%d日 %H:%M:%S')}")
+
+        with col_toggle:
+            auto_refresh_on = st.checkbox("自動更新ON", value=False, key="hq_auto_refresh")
+
+        with col_interval:
+            interval_sec = st.selectbox(
+                "更新間隔", [10, 15, 30, 60], index=1,
+                key="hq_refresh_interval", label_visibility="collapsed",
+                format_func=lambda x: f"{x}秒ごと"
+            )
+
         with col_refresh:
-            if st.button("🔄 時刻更新"):
+            if st.button("🔄 今すぐ更新"):
                 st.rerun()
+
+        # 自動更新が有効な場合、指定間隔で画面を再読み込みする
+        if auto_refresh_on:
+            st_autorefresh(interval=interval_sec * 1000, key="hq_autorefresh_timer")
 
         tab1, tab2, tab3 = st.tabs(["状況一覧表", "最新報告一覧(詳細)", "拠点別履歴検索"])
 
